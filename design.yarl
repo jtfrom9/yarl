@@ -1,0 +1,73 @@
+
+interface IBus() {
+    port master( output [ADR_WIDTH:0] Addr, 
+                 output [DAT_WIDTH:0] OutData,
+                 input  [DAT_WIDTH:0] InData,
+                 output req,
+                 output wen,
+                 input  ack );
+
+    port slave( input master.OutData  InData,
+                output master.InData  OutData,
+                output ack );
+
+    port monitor();
+}
+
+interface IMemIf() {
+    port master( output en,
+                 output write,
+                 input ack,
+                 output [ADR_WIDTH:0] Addr,
+                 output  [DAT_WIDTH:0] OutData,
+                 input  [DAT_WIDTH:0] InData );
+
+    port slave( input master.OutData InData,
+                output master.InData OutData,
+                output ack );
+    
+    port monitor();
+}
+
+
+module Bridge(input clk,
+              input rst,
+              IBus.slave bus,
+              IMemIf.master mem)
+{
+    state s;
+
+    always(clk.posedge || rst) {
+        if (~rst) {
+            s.reset();
+        }
+        else {
+            s.main();
+        }
+    }
+    
+    s.reset = func() {
+        bus.ack     = 0;
+        bus.OutData = 0;
+        mem.en      = 0;
+        mem.Addr    = 0;
+        mem.OutData = 0;
+        mem.write   = 0;
+        s.init();
+    }
+
+    s.main = async() {
+        wait(bus.req) {
+            mem.en    = 1;
+            mem.Addr  = bus.Addr;
+            mem.write = bus.wen;
+            bus.ack   = 1;
+        }
+        wait(mem.ack) {
+            mem.en = 0;
+            if (!mem.write)
+                bus.OutData = mem.InData;
+        }
+    }
+}
+
