@@ -1,73 +1,199 @@
 
-interface IBus() {
-    port master( output [ADR_WIDTH:0] Addr, 
-                 output [DAT_WIDTH:0] OutData,
-                 input  [DAT_WIDTH:0] InData,
-                 output req,
-                 output wen,
-                 input  ack );
-
-    port slave( input master.OutData  InData,
-                output master.InData  OutData,
-                output ack );
-
-    port monitor();
-}
-
-interface IMemIf() {
-    port master( output en,
-                 output write,
-                 input ack,
-                 output [ADR_WIDTH:0] Addr,
-                 output  [DAT_WIDTH:0] OutData,
-                 input  [DAT_WIDTH:0] InData );
-
-    port slave( input master.OutData InData,
-                output master.InData OutData,
-                output ack );
+interface IBus {
     
-    port monitor();
+    typedef logic[ADR_WIDTH-1:0] address_t;
+    typedef logic[DAT_WIDTH-1:0] data_t;
+
+    address_t  Addr;
+    data_t OutData;
+    data_t InData;
+    logic req;
+    logic wen;
+    logic ack;
+
+    port master{ 
+        output Addr;
+        output OutData;
+        input  InData;
+        output req;
+        output wen;
+        input  ack;
+    }
+
+    port slave{
+        input master.OutData  InData;  // alias
+        output master.InData  OutData; // alias
+        output ack;
+        // not defined signals are enable implicitly as input
+    }
+
+    port monitor{
+        // not defined signals are enable implicitly as input
+    }
 }
 
 
+interface IMemIf {
+    typedef IBus::address_t address_t;
+    typedef IBus::data_t data_t;
+
+    logic en;
+    logic write;
+    input ack;
+    address_t Addr;
+    data_t OutData;
+    data_t InData;
+
+    port master{ 
+        output en;
+        output write;
+        input ack;
+        output  Addr;
+        output  OutData;
+        input InData;
+        
+        function void write(address_t addr, data_t data ) 
+        {
+            en      = 1;
+            write   = 1;
+            Addr    = addr;
+            OutData = data;
+            wait ack;
+            en      = 0;
+        }
+        function void read(address_t addr, function(data_t tata) cb)
+        {
+            en = 1;
+            write = 0;
+            Addr = addr;
+            wait ack;
+            wait cb(InData);
+        }
+        function data_t read(address_t addr)
+        {
+            en = 1;
+            write = 0;
+            Addr = addr;
+            wait ack;
+            return InData;
+        }
+    }
+
+    port slave{
+        input master.OutData InData;
+        output master.InData OutData;
+        output ack;
+    }
+    
+    port monitor{}
+}
+
+
+// same as Bridge = module(...)
 module Bridge(input clk,
               input rst,
-              IBus.slave bus,
+              IBus.slave bus,  // interface are flatten in Verilog
               IMemIf.master mem)
 {
     state s;
+    logic [11:0] count;
+
+    //always and, always_comb are instantiated 
 
     always(clk.posedge || rst) {
         if (~rst) {
             s.reset();
+            count = 0;
         }
         else {
             s.main();
+            count += 1;
         }
     }
     
-    s.reset = func() {
+    function s::reset() {
         bus.ack     = 0;
         bus.OutData = 0;
         mem.en      = 0;
         mem.Addr    = 0;
         mem.OutData = 0;
         mem.write   = 0;
-        s.init();
+        s.init();  // method call replaced with other logic, insertion
     }
 
-    s.main = async() {
+    function s::main() { // in fsm, wait and yield statement allowed, generated state machine and some combinational function
         wait(bus.req) {
             mem.en    = 1;
             mem.Addr  = bus.Addr;
             mem.write = bus.wen;
-            bus.ack   = 1;
+
+            // Write
+            if(bus.wen) {
+                mem.OutData = bus.InData;
+                bus.ack = 1;
+                wait(1);
+                bus.ack = 0;
+                mem.en = 0;
+                wait(mem.ack);
+            }
+            // Read
+            else {
+                yield;
+                mem.en = 0;
+                wait(mem.ack) {
+                    bus.OutData = mem.InData;
+                    bus.ack = 1;
+                }
+                bus.ack = 0;
+            }
         }
-        wait(mem.ack) {
-            mem.en = 0;
-            if (!mem.write)
-                bus.OutData = mem.InData;
+
+        wait bus.req;
+        if(bus.wen) {
+            bus.ack = 1;
+            mem.write(bus.Addr, bus.InData);
+        }
+        else {
+            mem.read(bus.Addr, function(data) {
+                    bus.OutData = data;
+                    bus.ack     = 1;
+                });
         }
     }
+
+    logic [10:0] X;
+    logic [10:0] Y;
+    logic [10:0] Z;
+    always_comb {
+        Z = X + Y;
+    }
+
+    function foo(input [10:0]X, input [10:0] Y) { // same as foo = function(X,Y)
+        return X + Y;
+    }
+    assign Z = foo(X,Y);
 }
 
+
+// same as Top = module(...)
+module Top(input clk,
+           input rst,
+           IBus.slave bus,
+           IMemIf.master mem)
+{
+    logic delay_en;
+
+    // same as b1 = Bridge(clk,rst,bus,mem)
+    Bridge b1(clk, rst, 
+              IBus(.Addr(bus.Addr), // interface instantiation creates new interface connection
+                   .OutData(bus.OutData), 
+                   .InData(bus.InData),
+                   .req(bus.req), 
+                   .en(delay_en),
+                   .ack(bus.ack) ),
+              mem);
+    
+    alwasys(clk.posedge) {
+        delay_en = bus.wen;
+    }
+}
