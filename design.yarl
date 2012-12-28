@@ -39,7 +39,7 @@ channel MemIfCh {
 
     logic en;
     logic write;
-    input ack;
+    logic ack;
     address_t Addr;
     data_t OutData;
     data_t InData;
