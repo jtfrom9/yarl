@@ -1,0 +1,64 @@
+typedef logic[31:0] int;
+typedef logic[3:0]  axi_id_t;
+typedef logic[31:0] axi_addr_t;
+typedef logic[3:0]  axi_len_t;
+typedef logic[2:0]  axi_size_t;
+
+channel WriteChannel()
+{
+    parameter ADR_WIDTH=32;
+    parameter DAT_WIDTH=32;
+
+    axi_id_t   awid;
+    axi_addr_t awaddr;
+    axi_len_t  awlen;
+    axi_size_t awsize;
+
+    port master {
+        output awid;
+        output awaddr;
+        output awlen;
+        output awsize;
+
+        function void write()
+        {
+        }
+    }
+
+    port slave { }
+    port monitor { }
+}
+
+module PCI2AXI( logic clk,
+                PCI.slave pci1,
+                PCI.slave pci2,
+                AXI::WriteChannel axi )
+{
+    state s(clk.posedge);
+
+    event(s) {
+        wait(pci1.req);
+        write(pci1);
+    }
+    event(s) {
+        wait(pci2.req);
+        write(pci2);
+    }
+    event(s) {
+        s.main();
+    }
+
+    function write(PCI.slave pci)
+    {
+        axi.write(pci.addr, pci.data);
+    }
+    function main()
+    {
+    }
+}
+    
+module Top( clk, rst, PCI.master )
+{
+    AXI::WriteChannel #(16,32) axi_w(...);
+        PCI2AXI(pci1, pci2, axi_w);
+}

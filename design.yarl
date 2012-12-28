@@ -1,5 +1,5 @@
 
-interface IBus {
+channel BusCh {
     
     typedef logic[ADR_WIDTH-1:0] address_t;
     typedef logic[DAT_WIDTH-1:0] data_t;
@@ -33,9 +33,9 @@ interface IBus {
 }
 
 
-interface IMemIf {
-    typedef IBus::address_t address_t;
-    typedef IBus::data_t data_t;
+channel MemIfCh {
+    typedef BusCh.address_t address_t;
+    typedef BusCh.data_t data_t;
 
     logic en;
     logic write;
@@ -58,7 +58,7 @@ interface IMemIf {
             write   = 1;
             Addr    = addr;
             OutData = data;
-            wait ack;
+            wait(ack);
             en      = 0;
         }
         function void read(address_t addr, function(data_t tata) cb)
@@ -66,15 +66,15 @@ interface IMemIf {
             en = 1;
             write = 0;
             Addr = addr;
-            wait ack;
-            wait cb(InData);
+            wait(ack);
+            wait(cb(InData));
         }
         function data_t read(address_t addr)
         {
             en = 1;
             write = 0;
             Addr = addr;
-            wait ack;
+            wait(ack);
             return InData;
         }
     }
@@ -92,26 +92,25 @@ interface IMemIf {
 // same as Bridge = module(...)
 module Bridge(input clk,
               input rst,
-              IBus.slave bus,  // interface are flatten in Verilog
-              IMemIf.master mem)
+              BusCh.slave bus,  // channel are flatten in Verilog
+              MemIfCh.master mem)
 {
-    state s;
     logic [11:0] count;
+    state s(clk.posedge || rst);
 
     //always and, always_comb are instantiated 
 
-    always(clk.posedge || rst) {
-        if (~rst) {
-            s.reset();
+    event(s) {
+        if(~rst) {
+            reset();
             count = 0;
-        }
-        else {
-            s.main();
+        } else {
+            main();
             count += 1;
         }
     }
     
-    function s::reset() {
+    function reset() {
         bus.ack     = 0;
         bus.OutData = 0;
         mem.en      = 0;
@@ -121,79 +120,59 @@ module Bridge(input clk,
         s.init();  // method call replaced with other logic, insertion
     }
 
-    function s::main() { // in fsm, wait and yield statement allowed, generated state machine and some combinational function
-        wait(bus.req) {
-            mem.en    = 1;
-            mem.Addr  = bus.Addr;
-            mem.write = bus.wen;
-
-            // Write
-            if(bus.wen) {
-                mem.OutData = bus.InData;
-                bus.ack = 1;
-                wait(1);
-                bus.ack = 0;
-                mem.en = 0;
-                wait(mem.ack);
-            }
-            // Read
-            else {
-                yield;
-                mem.en = 0;
-                wait(mem.ack) {
-                    bus.OutData = mem.InData;
-                    bus.ack = 1;
-                }
-                bus.ack = 0;
-            }
-        }
-
-        wait bus.req;
+    function main() { // in fsm, wait and yield statement allowed, generated state machine and some combinational function
+        wait(bus.req);
         if(bus.wen) {
             bus.ack = 1;
             mem.write(bus.Addr, bus.InData);
         }
         else {
+            // closure style
             mem.read(bus.Addr, function(data) {
                     bus.OutData = data;
                     bus.ack     = 1;
                 });
+            // async/await style with wait statement
+            bus.OutData = wait(mem.read(bus.Addr));
+            bus.ack     = 1;
         }
     }
 
     logic [10:0] X;
     logic [10:0] Y;
     logic [10:0] Z;
-    always_comb {
+    event {  // combinational
         Z = X + Y;
     }
 
     function foo(input [10:0]X, input [10:0] Y) { // same as foo = function(X,Y)
         return X + Y;
     }
-    assign Z = foo(X,Y);
+    event {
+        Z = foo(X,Y);
+    }
 }
 
 
 // same as Top = module(...)
 module Top(input clk,
            input rst,
-           IBus.slave bus,
-           IMemIf.master mem)
+           BusCh.slave bus,
+           MemIfCh.master mem)
 {
     logic delay_en;
 
     // same as b1 = Bridge(clk,rst,bus,mem)
     Bridge b1(clk, rst, 
-              IBus(.Addr(bus.Addr), // interface instantiation creates new interface connection
-                   .OutData(bus.OutData), 
-                   .InData(bus.InData),
-                   .req(bus.req), 
-                   .en(delay_en),
-                   .ack(bus.ack) ),
+              BusCh.slave(.Addr(bus.Addr), // channel instantiation creates new channel connection
+                          .OutData(bus.OutData), 
+                          .InData(bus.InData),
+                          .req(bus.req), 
+                          .en(delay_en),
+                          .ack(bus.ack) ),
               mem);
     
-    alwasys(clk.posedge) {
+    event(clk.posedge) {
         delay_en = bus.wen;
     }
 }
