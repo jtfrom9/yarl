@@ -52,7 +52,7 @@ channel MemIfCh {
         output  OutData;
         input InData;
         
-        function void write(address_t addr, data_t data ) 
+        func write(address_t addr, data_t data ) 
         {
             en      = 1;
             write   = 1;
@@ -61,15 +61,15 @@ channel MemIfCh {
             wait(ack);
             en      = 0;
         }
-        function void read(address_t addr, function(data_t tata) cb)
+        func read(address_t addr, (data_t tata) cb)
         {
             en = 1;
             write = 0;
             Addr = addr;
             wait(ack);
-            wait(cb(InData));
+            cb(InData);
         }
-        function data_t read(address_t addr)
+        func data_t read(address_t addr)
         {
             en = 1;
             write = 0;
@@ -95,22 +95,7 @@ module Bridge(input clk,
               BusCh.slave bus,  // channel are flatten in Verilog
               MemIfCh.master mem)
 {
-    logic [11:0] count;
-    state s(clk.posedge || rst);
-
-    //always and, always_comb are instantiated 
-
-    event(s) {
-        if(~rst) {
-            reset();
-            count = 0;
-        } else {
-            main();
-            count += 1;
-        }
-    }
-    
-    function reset() {
+    func reset() {
         bus.ack     = 0;
         bus.OutData = 0;
         mem.en      = 0;
@@ -120,36 +105,34 @@ module Bridge(input clk,
         s.init();  // method call replaced with other logic, insertion
     }
 
-    function main() { // in fsm, wait and yield statement allowed, generated state machine and some combinational function
-        wait(bus.req);
-        if(bus.wen) {
-            bus.ack = 1;
-            mem.write(bus.Addr, bus.InData);
-        }
-        else {
-            // closure style
-            mem.read(bus.Addr, function(data) {
-                    bus.OutData = data;
-                    bus.ack     = 1;
-                });
-            // async/await style with wait statement
-            bus.OutData = wait(mem.read(bus.Addr));
-            bus.ack     = 1;
-        }
-    }
+    //always and, always_comb are instantiated 
 
-    logic [10:0] X;
-    logic [10:0] Y;
-    logic [10:0] Z;
-    event {  // combinational
-        Z = X + Y;
-    }
+    // in fsm, wait and yield statement allowed, generated state machine and some combinational function
+    event proc(clk.posedge || rst) {
+        logic [11:0] count; // writable in this event
 
-    function foo(input [10:0]X, input [10:0] Y) { // same as foo = function(X,Y)
-        return X + Y;
+        if(~rst) {
+            reset();
+            count = 0;
+        } else {
+            @bus.req;
+            if(bus.wen) {
+                bus.ack = 1;
+                mem.write(bus.Addr, bus.InData);
+            }
+            else {
+                mem.read(bus.Addr, func(data_t d) {
+                        bus.OutData = d;
+                        bus.ack = 1;
+                    });
+            }
+            count += 1;
+        }
     }
-    event {
-        Z = foo(X,Y);
+    
+    event count_mon()
+    {
+        $display(fsm.count);
     }
 }
 

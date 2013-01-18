@@ -1,0 +1,10 @@
+channel
+typedef
+port
+output
+input
+function
+module
+event
+if
+else
