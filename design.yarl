@@ -58,24 +58,16 @@ channel MemIfCh {
             write   = 1;
             Addr    = addr;
             OutData = data;
-            wait(ack);
+            @(ack);
             en      = 0;
         }
-        func read(address_t addr, (data_t tata) cb)
+        func read(address_t addr, action<data_t> cb)
         {
             en = 1;
             write = 0;
             Addr = addr;
-            wait(ack);
+            @(ack);
             cb(InData);
-        }
-        func data_t read(address_t addr)
-        {
-            en = 1;
-            write = 0;
-            Addr = addr;
-            wait(ack);
-            return InData;
         }
     }
 
@@ -95,24 +87,12 @@ module Bridge(input clk,
               BusCh.slave bus,  // channel are flatten in Verilog
               MemIfCh.master mem)
 {
-    func reset() {
-        bus.ack     = 0;
-        bus.OutData = 0;
-        mem.en      = 0;
-        mem.Addr    = 0;
-        mem.OutData = 0;
-        mem.write   = 0;
-        s.init();  // method call replaced with other logic, insertion
-    }
-
-    //always and, always_comb are instantiated 
-
-    // in fsm, wait and yield statement allowed, generated state machine and some combinational function
     event proc(clk.posedge || rst) {
         logic [11:0] count; // writable in this event
 
         if(~rst) {
-            reset();
+            bus.reset();
+            mem.reset();
             count = 0;
         } else {
             @bus.req;
@@ -121,7 +101,7 @@ module Bridge(input clk,
                 mem.write(bus.Addr, bus.InData);
             }
             else {
-                mem.read(bus.Addr, func(data_t d) {
+                mem.read(bus.Addr, (data_t d) => {
                         bus.OutData = d;
                         bus.ack = 1;
                     });

@@ -3,8 +3,9 @@ typedef
 port
 output
 input
-function
+func
 module
 event
 if
 else
+wait
