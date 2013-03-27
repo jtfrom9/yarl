@@ -26,6 +26,9 @@ class AstNode(object):
     def colno(self):
         return self.loc_info[1]
 
+    def traverse(self,visitor,arg):
+        visitor.visit(self, arg)
+
 class Id(AstNode):
     def __init__(self, head, tails):
         self._ids = tuple([head] + tails)
